@@ -1,10 +1,7 @@
-/docs/*
-!/docs/thunder_papers.md
-/data/*
+/docs/
+data/
+build*
+__pycache__/
 
 .env
 TODO.md
-CLAUDE.md
-
-build
-__pycache__/

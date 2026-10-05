@@ -1,0 +1,15 @@
+Documentation:
+  CommentFormat: Doxygen
+
+CompileFlags:
+  Add: [-ferror-limit=0, -Wno-zero-length-array]
+  Remove: [-freflection]
+
+Diagnostics:
+  Suppress: [no_member]
+
+---
+If:
+  PathMatch: [src/main\.cpp, src/io/database\.(h|cpp), src/io/bridge\.(h|cpp), src/cli/commands\.h, qr/qr/.*\.hpp]
+Diagnostics:
+  Suppress: [typename_requires_specqual, blocks_disable, nonfunction_block_type, expected_capture, expected_qualified_after_typename,expected_expression, expected, unused-parameter, auto_fn_used_before_defined, expected_unqualified_id]
