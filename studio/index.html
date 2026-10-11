@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>qstorm studio</title>
+  <link rel="stylesheet" href="https://pyscript.net/releases/2026.7.3/core.css">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="https://pyscript.net/releases/2026.7.3/core.js"></script>
+  <script type="py" src="app/main.py" config="pyscript.toml"></script>
+</head>
+
+<body>
+  <div class="workspace">
+    <aside class="library">
+      <section class="panel list">
+        <header class="head">
+          <div class="segmented">
+            <button id="millisecond" type="button">ms</button>
+            <button id="second" type="button">sec</button>
+          </div>
+          <span class="fill"></span>
+          <button id="deleted" type="button">deleted</button>
+        </header>
+        <div id="list"></div>
+      </section>
+      <section class="panel">
+        <h2>source</h2>
+        <dl id="source-facts" class="pairs"></dl>
+      </section>
+    </aside>
+
+    <main class="stage">
+      <section class="panel wave">
+        <header class="head">
+          <h2>waveform</h2>
+          <span id="range" class="dim"></span>
+          <span id="density" class="dim"></span>
+          <span class="fill"></span>
+          <span id="status" class="bright"></span>
+        </header>
+        <div class="plot">
+          <div id="window-layer"></div>
+          <canvas id="wave"></canvas>
+        </div>
+        <div class="controls">
+          <div class="row">
+            <div class="toggles">
+              <button id="play" type="button">PLAY</button>
+              <button id="stop" type="button">STOP</button>
+              <button id="loop" type="button">LOOP</button>
+              <button id="follow" type="button">TRACK</button>
+            </div>
+            <div class="toggles">
+              <button id="compact" type="button">compact</button>
+              <button id="half" type="button">half</button>
+              <button id="rms" type="button">rms</button>
+              <button id="logarithmic" type="button">log</button>
+              <select id="floor">
+                <option value="-36">-36 dB</option>
+                <option value="-48">-48 dB</option>
+                <option value="-60" selected>-60 dB</option>
+                <option value="-72">-72 dB</option>
+                <option value="-84">-84 dB</option>
+                <option value="-96">-96 dB</option>
+                <option value="-120">-120 dB</option>
+                <option value="-145">-145 dB</option>
+              </select>
+            </div>
+            <span id="target" class="dim"></span>
+            <span id="selection" class="dim"></span>
+            <span class="fill"></span>
+            <div class="toggles">
+              <button id="zoom-out" type="button" class="key">−</button>
+              <button id="center" type="button">center</button>
+              <button id="zoom-window" type="button">window</button>
+              <button id="zoom-in" type="button" class="key">+</button>
+            </div>
+          </div>
+          <div class="row">
+            <div id="meter" class="meter">
+              <span></span><span></span>
+            </div>
+            <label class="fader" for="master">
+              <span class="name">vol</span>
+              <span class="rail">
+                <input id="master" type="range" min="0" max="499" value="499" data-format="percent">
+                </span>
+              <output for="master"></output>
+            </label>
+            <label class="fader" for="pan">
+              <span class="name">pan</span>
+              <span class="end">L</span>
+              <span class="rail bipolar"><input id="pan" type="range" min="-100" max="100" value="0"
+                  data-format="pan" data-detent="0"></span>
+              <span class="end">R</span>
+              <output for="pan"></output>
+            </label>
+            <div class="toggles">
+              <button id="mono" type="button">mono</button>
+              <button id="normalize" type="button">normalize</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="lower">
+        <section class="panel telemetry">
+          <header class="head">
+            <h2>window</h2>
+            <span id="window-index" class="dim"></span>
+            <button id="extract" type="button" disabled>extract</button>
+            <button id="extract-selection" type="button" disabled>extract selection</button>
+            <button id="reject" type="button" disabled>reject</button>
+            <button id="previous" type="button" class="key">‹</button>
+            <button id="next" type="button" class="key">›</button>
+          </header>
+          <div class="axes">
+            <div>
+              <h3>x <span>ms</span></h3>
+              <div id="axis-x" class="fields"></div>
+            </div>
+            <div>
+              <h3>y <span>dB</span></h3>
+              <dl id="axis-y" class="pairs"></dl>
+            </div>
+            <div>
+              <h3><label for="factor">factor</label></h3>
+              <select id="factor"></select>
+              <dl id="factor-fields" class="pairs"></dl>
+            </div>
+          </div>
+          <p id="window-key" class="dim"></p>
+        </section>
+
+      </div>
+    </main>
+  </div>
+</body>
+
+</html>

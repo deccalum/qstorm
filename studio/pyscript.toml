@@ -1,0 +1,8 @@
+packages = ["numpy"]
+
+[files]
+"./app/library.py" = "./library.py"
+"./app/mixer_fader.py" = "./mixer_fader.py"
+"./app/relay.py" = "./relay.py"
+"./app/view.py" = "./view.py"
+"./app/waveform.py" = "./waveform.py"
