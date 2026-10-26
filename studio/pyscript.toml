@@ -1,8 +1,10 @@
 packages = ["numpy"]
 
 [files]
+"./app/component.py" = "./component.py"
 "./app/library.py" = "./library.py"
 "./app/mixer_fader.py" = "./mixer_fader.py"
+"./app/plot.py" = "./plot.py"
 "./app/relay.py" = "./relay.py"
 "./app/view.py" = "./view.py"
 "./app/waveform.py" = "./waveform.py"

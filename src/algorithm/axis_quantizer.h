@@ -8,256 +8,266 @@
 #include <cstdlib>
 #include <limits>
 #include <span>
+#include <type_traits>
 #include <utility>
-#include <vector>
 
 #include "algorithm/math_constant.h"
 
 namespace qstorm::algorithm {
-
 template <typename X, typename Y, typename Z>
-struct Spectrogram;
+struct Spectrum;
 
 template <typename T>
-struct Quantization {
-  size_t extent;
-  T      density;
-  T      offset;
+struct Qtz {
+  size_t n;    // Number of grid points
+  T      rho;  // Density Per Axis - grid points per axis unit
+  T      pos;  // Axis coordinate at grid index 0
 
-  static Quantization stepped(size_t extent, T step, T offset) {
+  static Qtz stepped(size_t n, T step, T pos) {
     const T density = T{1} / step;
-    return {extent, density, offset};
+    return {n, density, pos};
   }
 
   template <typename U>
-  Quantization<U> as() const {
-    const U density_as = static_cast<U>(density);
-    const U offset_as = static_cast<U>(offset);
-    return {extent, density_as, offset_as};
+  Qtz<U> as() const {
+    const U rho_as = rho;
+    const U pos_as = pos;
+    return {n, rho_as, pos_as};
   }
 
-  size_t frame(T duration) const {
-    const T scaled = duration*density;
-    return static_cast<size_t>(std::round(scaled));
+  size_t frame(T dx) const {
+    const T scaled = dx * rho;
+    return std::round(scaled);
   }
 
  private:
   template <typename Discrete = int64_t>
-  constexpr Discrete quantize(T continuous) const {
-    return static_cast<Discrete>(std::round((continuous - offset) * density));
+  constexpr Discrete qtz(T continuous) const {
+    return std::round((continuous - pos) * rho);
   }
-
   template <typename Discrete>
-  constexpr T dequantize(Discrete discrete) const {
-    return static_cast<T>(discrete) / density + offset;
+  constexpr T dqtz(Discrete discrete) const {
+    return discrete / rho + pos;
   }
 
   template <typename U>
-  friend U grid(U value, const Quantization<U>& a, int64_t n);
+  friend U grid(U val, const Qtz<U>& q, int64_t n);
   template <typename U>
-  friend U fraction(const Quantization<U>& a);
+  friend U fraction(const Qtz<U>& q);
   template <typename X, typename Z>
-  friend size_t cell(X x, Z z, const Quantization<X>& x_ms, const Quantization<Z>& z_hz);
+  friend size_t cell(X x, Z z, const Qtz<X>& qx, const Qtz<Z>& qz);
   template <typename X>
-  friend Quantization<X> axis(const Quantization<X>& x, X axis_a, X axis_b);
+  friend Qtz<X> axis(const Qtz<X>& qx, X x0, X x1);
   template <typename X, typename Y, typename Z>
-  friend struct Spectrogram;
+  friend struct Spectrum;
 };
 
 template <typename T>
-T grid(T value, const Quantization<T>& a, int64_t n) {
-  const int64_t i = a.quantize(value);
-  return a.dequantize(i + n);
+T grid(T val, const Qtz<T>& q, int64_t n) {
+  const int64_t i = q.qtz(val);
+  return q.dqtz(i + n);
 }
 
 template <typename T>
-T on_axis(T value, const Quantization<T>& a) {
-  const bool silent = value == -std::numeric_limits<T>::infinity();
-  return silent ? a.offset : value;
+T on_axis(T val, const Qtz<T>& q) {
+  const bool silent = val == -k::INF<T>;
+  return silent ? q.pos : val;
 }
 
 template <typename T>
-T fraction(const Quantization<T>& a) {
-  const T  first = a.dequantize(0);
-  const T second = a.dequantize(1);
-  return second - first;
+T fraction(const Qtz<T>& q) {
+  const T x0 = q.dqtz(0);
+  const T x1 = q.dqtz(1);
+  return x1 - x0;
 }
 
 template <typename X, typename Z>
-size_t cell(X x, Z z, const Quantization<X>& x_ms, const Quantization<Z>& z_hz) {
-  const size_t   f = x_ms.template quantize<size_t>(x);
-  const size_t   k = z_hz.template quantize<size_t>(z);
-  const size_t bin = z_hz.extent;
-  return f*bin + k;
+size_t cell(X x, Z z, const Qtz<X>& qx, const Qtz<Z>& qz) {
+  const size_t i  = qx.template qtz<size_t>(x);
+  const size_t k  = qz.template qtz<size_t>(z);
+  const size_t nz = qz.n;
+  return i * nz + k;
 }
 
 template <typename X>
-Quantization<X> axis(const Quantization<X>& x, X axis_a, X axis_b) {
-  const int64_t lo = x.quantize(axis_a);
-  const int64_t hi = x.quantize(axis_b);
-  const size_t  extent = static_cast<size_t>(hi - lo);
-  const X       offset = x.dequantize(lo);
-  return {extent, x.density, offset};
+Qtz<X> axis(const Qtz<X>& qx, X x0, X x1) {
+  const int64_t i0  = qx.qtz(x0);
+  const int64_t i1  = qx.qtz(x1);
+  const size_t  n   = i1 - i0;
+  const X       pos = qx.dqtz(i0);
+  return {n, qx.rho, pos};
 }
 
 template <typename Y>
-std::vector<Y*> rows(const std::vector<Y*>& channel, size_t first) {
-  std::vector<Y*> moved;
-  for (Y* row : channel) moved.push_back(row + first);
+vec<Y*> rows(const vec<Y*>& ch, size_t i0) {
+  vec<Y*> moved;
+  for (Y* row : ch) moved.push_back(row + i0);
   return moved;
 }
 
 template <typename Derived, typename T>
 struct grid_step {
   Derived& next() {
-    Derived& self = static_cast<Derived&>(*this);
-    T& value = self.*Derived::value_member;
-    const Quantization<T>& axis = *(self.*Derived::axis_member);
-    value = grid(value, axis, +1);
+    Derived&      self = static_cast<Derived&>(*this);
+    T&            val  = self.*Derived::val_member;
+    const Qtz<T>& q    = *(self.*Derived::axis_member);
+    val                = grid(val, q, +1);
     return self;
   }
   Derived& prev() {
-    Derived& self = static_cast<Derived&>(*this);
-    T& value = self.*Derived::value_member;
-    const Quantization<T>& axis = *(self.*Derived::axis_member);
-    value = grid(value, axis, -1);
+    Derived&      self = static_cast<Derived&>(*this);
+    T&            val  = self.*Derived::val_member;
+    const Qtz<T>& q    = *(self.*Derived::axis_member);
+    val                = grid(val, q, -1);
     return self;
   }
 
   Derived& operator++() { return next(); }
   Derived& operator--() { return prev(); }
-  Derived operator++(int) {
-    const Derived before = static_cast<Derived&>(*this);
+  Derived  operator++(int) {
+    const Derived v0 = static_cast<Derived&>(*this);
     next();
-    return before;
+    return v0;
   }
   Derived operator--(int) {
-    const Derived before = static_cast<Derived&>(*this);
+    const Derived v0 = static_cast<Derived&>(*this);
     prev();
-    return before;
+    return v0;
   }
 };
 
 template <typename X>
 struct ms : grid_step<ms<X>, X> {
-  X x;
-  const Quantization<X>* x_ms;
+  X                  x;
+  const Qtz<X>*      qx;
+  static constexpr X ms::*       val_member        = &ms::x;
+  static constexpr const Qtz<X>* ms::* axis_member = &ms::qx;
 
-  static constexpr X ms::* value_member = &ms::x;
-  static constexpr const Quantization<X>* ms::* axis_member = &ms::x_ms;
-
-  ms(X value, const Quantization<X>* axis) : x(value), x_ms(axis) {}
-  operator X() const { return x; }
-  X time_fraction() const { return fraction(*x_ms); }
-
-  ms& operator=(X value) {
-    x = value;
+  ms() = default;
+  ms(X val, const Qtz<X>* q) : x(val), qx(q) {}
+      operator X() const { return x; }
+  X   time_fraction() const { return fraction(*qx); }
+  ms& operator=(X val) {
+    x = val;
     return *this;
   }
 };
 
 template <typename Y>
 struct db : grid_step<db<Y>, Y> {
-  Y y;
-  const Quantization<Y>* y_db;
+  Y                  y;
+  const Qtz<Y>*      qy;
+  static constexpr Y db::*       val_member        = &db::y;
+  static constexpr const Qtz<Y>* db::* axis_member = &db::qy;
 
-  static constexpr Y db::* value_member = &db::y;
-  static constexpr const Quantization<Y>* db::* axis_member = &db::y_db;
-
-  static Y ratio(double linear) { return static_cast<Y>(20.0*std::log10(linear)); }
-
-  db(Y value, const Quantization<Y>* axis) : y(on_axis(value, *axis)), y_db(axis) {}
-
-  operator Y() const { return y; }
-
-  db& operator=(Y value) {
-    y = on_axis(value, *y_db);
+  static Y ratio(double lin) { return 20.0 * std::log10(lin); }
+  static Y lin(Y db) { return std::pow(10.0, db / 10.0); }
+  db(Y val, const Qtz<Y>* q) : y(on_axis(val, *q)), qy(q) {}
+      operator Y() const { return y; }
+  db& operator=(Y val) {
+    y = on_axis(val, *qy);
     return *this;
   }
 };
 
 template <typename Y>
-Y vol_db(size_t i, size_t count) {
-  const double fraction = static_cast<double>(i) / static_cast<double>(count - 1);
-  return db<Y>::ratio(fraction);
+Y vol_db(size_t i, size_t n) {
+  const double i1 = n - 1;
+  const double t  = i / i1;
+  return db<Y>::ratio(t);
 }
 
-template <typename Y, size_t... i> std::array<db<Y>, sizeof...(i)>
-gain_step(const Quantization<Y>& y, std::index_sequence<i...>) {
-  return {db<Y>(vol_db<Y>(i, sizeof...(i)), &y)...};
+template <typename Y, size_t... i>
+std::array<db<Y>, sizeof...(i)> gain_step(const Qtz<Y>& qy, std::index_sequence<i...>) {
+  return {db<Y>(vol_db<Y>(i, sizeof...(i)), &qy)...};
 }
 
 template <typename Z>
 struct hz : grid_step<hz<Z>, Z> {
-  Z z;
-  const Quantization<Z>* z_hz;
+  Z                  z;
+  const Qtz<Z>*      qz;
+  static constexpr Z hz::*       val_member        = &hz::z;
+  static constexpr const Qtz<Z>* hz::* axis_member = &hz::qz;
 
-  static constexpr Z hz::* value_member = &hz::z;
-  static constexpr const Quantization<Z>* hz::* axis_member = &hz::z_hz;
-
-  hz(Z value, const Quantization<Z>* axis) : z(value), z_hz(axis) {}
-
-  operator Z() const { return z; }
-
-  hz& operator=(Z value) {
-    z = value;
+  hz(Z val, const Qtz<Z>* q) : z(val), qz(q) {}
+      operator Z() const { return z; }
+  hz& operator=(Z val) {
+    z = val;
     return *this;
   }
 };
 
 template <typename X, typename Y = X, typename Z = X>
-struct Spectrogram {
-  std::vector<Y*> channel;
-  Quantization<X> x_ms;
-  Quantization<Y> y_db;
-  Quantization<Z> z_hz;
+struct Spectrum {
+  vec<Y*> ch;
+  Qtz<X>  qx;
+  Qtz<Y>  qy;
+  Qtz<Z>  qz;
+  ms<X>   x0() const { return {qx.pos, &qx}; }
+  ms<X>   x1() const { return {qx.dqtz(qx.n), &qx}; }
 
-  ms<X> begin() const { return {x_ms.offset, &x_ms}; }
-  ms<X> end() const { return {x_ms.dequantize(x_ms.extent), &x_ms}; }
-
-  db<Y> operator[](X x) const {
-    const size_t i = cell(x, z_hz.offset, x_ms, z_hz);
-    return {channel.front()[i], &y_db};
+  db<Y> operator[](X x, size_t c = 0) const {
+    const size_t i = cell(x, qz.pos, qx, qz);
+    return {ch[c][i], &qy};
   }
-  db<Y> operator[](X x, Z z) const {
-    const size_t i = cell(x, z, x_ms, z_hz);
-    return {channel.front()[i], &y_db};
-  }
-
-  hz<Z> z_begin() const { return {z_hz.offset, &z_hz}; }
-  hz<Z> z_end() const { return {z_hz.dequantize(z_hz.extent), &z_hz}; }
-
-  Spectrogram window(X axis_a, X axis_b) const {
-    const size_t first = cell(axis_a, z_hz.offset, x_ms, z_hz);
-    return {rows(channel, first), axis(x_ms, axis_a, axis_b), y_db, z_hz};
+  db<Y> operator[](X x, Z z, size_t c = 0) const {
+    const size_t i = cell(x, z, qx, qz);
+    return {ch[c][i], &qy};
   }
 
-  Spectrogram frame(X x) const {
-    const X next = grid(x, x_ms, 1);
-    return window(x, next);
+  hz<Z> z0() const { return {qz.pos, &qz}; }
+  hz<Z> z1() const { return {qz.dqtz(qz.n), &qz}; }
+
+  Spectrum window(X x0, X x1) const {
+    const size_t i0 = cell(x0, qz.pos, qx, qz);
+    return {rows(ch, i0), axis(qx, x0, x1), qy, qz};
   }
+  Spectrum frame(X x0) const {
+    const X x1 = grid(x0, qx, 1);
+    return window(x0, x1);
+  }
+
+  Spectrum select(size_t c) const { return {{ch[c]}, qx, qy, qz}; }
 };
 
+template <typename X, typename Y = X, typename Z = X>
+using zvec = vec<Spectrum<X, Y, Z>>;
+
+template <typename X, typename Y, typename Z>
+zvec<X, Y, Z> select_ch(const zvec<X, Y, Z>& band, size_t ch) {
+  zvec<X, Y, Z> c;
+  for (const Spectrum<X, Y, Z>& each : band) c.push_back(each.select(ch));
+  return c;
+}
+
+template <typename X, typename Y, typename Z>
+vec<Qtz<Z>> band_axis(const zvec<X, Y, Z>& band) {
+  vec<Qtz<Z>> qz;
+  for (const Spectrum<X, Y, Z>& each : band) qz.push_back(each.qz);
+  return qz;
+}
+
 template <typename T>
-std::vector<std::vector<T>> deinterleave(std::span<const T> interleaved, size_t count) {
-  const size_t extent = interleaved.size() / count;
-  std::vector<std::vector<T>> channel(count, std::vector<T>(extent));
-  for (size_t i = 0; i < extent; i++)
-    for (size_t j = 0; j < count; j++) channel[j][i] = interleaved[i*count + j];
-  return channel;
+vvec<T> xc_to_cx(std::span<const T> xc, size_t nc) {
+  const size_t nx = xc.size() / nc;
+
+  vvec<T> cx(nc, vec<T>(nx));
+  for (size_t i = 0; i < nx; i++)
+    for (size_t c = 0; c < nc; c++) cx[c][i] = xc[i * nc + c];
+  return cx;
 }
 
 template <typename S, typename Y>
-std::vector<S> mix(std::span<const S> interleaved, size_t count, std::span<const Y> gain, bool mono) {
-  const size_t extent = interleaved.size() / count;
-  std::vector<S> mix(interleaved.size());
-  for (size_t i = 0; i < extent; i++) {
+vec<S> xc_mix(std::span<const S> xc, size_t nc, std::span<const Y> gain, bool mono) {
+  const size_t nx = xc.size() / nc;
+  vec<S>       mix(xc.size());
+  for (size_t i = 0; i < nx; i++) {
     Y sum = 0;
-    for (size_t j = 0; j < count; j++) sum += static_cast<Y>(interleaved[i*count + j]);
-    const Y mean = sum / static_cast<Y>(count);
-    for (size_t j = 0; j < count; j++) {
-      const Y source = mono ? mean : static_cast<Y>(interleaved[i*count + j]);
-      mix[i*count + j] = static_cast<S>(source*gain[j]);
+    for (size_t c = 0; c < nc; c++) sum += static_cast<Y>(xc[i * nc + c]);
+    const Y mean = sum / static_cast<Y>(nc);
+    for (size_t c = 0; c < nc; c++) {
+      const Y source  = mono ? mean : static_cast<Y>(xc[i * nc + c]);
+      mix[i * nc + c] = static_cast<S>(source * gain[c]);
     }
   }
   return mix;
@@ -270,47 +280,98 @@ int shift(int bits) {
 
 template <typename Y>
 Y depth_floor(int bits) {
-  return static_cast<Y>(-static_cast<double>(bits) * k::DbPerBit);
+  return -bits * k::DbPerBit;
 }
 
 template <typename Y, typename S>
-std::vector<Y> amplitude(const std::vector<S>& interleaved) {
-  const Y full_scale = std::ldexp(Y{1}, std::numeric_limits<S>::digits);
-  std::vector<Y> scaled(interleaved.size());
-  for (size_t i = 0; i < interleaved.size(); i++) scaled[i] = static_cast<Y>(interleaved[i]) / full_scale;
-  return scaled;
+Y full_scale() {
+  return std::ldexp(Y{1}, std::numeric_limits<S>::digits);
+}
+
+template <typename Y, typename S>
+vec<Y> amp(const vec<S>& xc) {
+  const Y full = full_scale<Y, S>();
+  vec<Y>  scale(xc.size());
+  for (size_t i = 0; i < xc.size(); i++) scale[i] = static_cast<Y>(xc[i]) / full;
+  return scale;
+}
+
+template <typename Y, typename S>
+vvec<Y> ch_amp(const vec<S>& xc, size_t nc) {
+  const vec<Y> scale = amp<Y>(xc);
+  return xc_to_cx<Y>(scale, nc);
+}
+
+template <typename S, typename X>
+std::span<const S> xc_window(const vec<S>& xc, size_t nc, X hz, std::type_identity_t<X> x0,
+                             std::type_identity_t<X> x1) {
+  const size_t nx   = xc.size() / nc;
+  const X      xmax = nx / hz;
+  const Qtz<X> qx{nx, hz, X{0}};
+  const size_t i0 = qx.frame(x0);
+  const size_t i1 = qx.frame(std::min(x1, xmax));
+  return std::span<const S>(xc).subspan(i0 * nc, (i1 - i0) * nc);
+}
+
+template <typename S, typename Y>
+vec<S> xc_qtzd(const vvec<Y>& cx) {
+  const Y      full = full_scale<Y, S>();
+  const Y      y1   = static_cast<Y>(std::numeric_limits<S>::max());
+  const Y      y0   = static_cast<Y>(std::numeric_limits<S>::min());
+  const size_t nc   = cx.size();
+  const size_t nx   = cx.front().size();
+  vec<S>       xc(nc * nx);
+  for (size_t i = 0; i < nx; i++)
+    for (size_t c = 0; c < nc; c++)
+      xc[i * nc + c] = static_cast<S>(std::clamp(std::round(cx[c][i] * full), y0, y1));
+  return xc;
 }
 
 template <typename Y>
-Quantization<Y> y_db(const std::vector<std::vector<Y>>& channel, Y floor) {
-  double min = 0.0;
-  for (const std::vector<Y>& row : channel)
-    for (Y value : row)
-      if (std::isfinite(value)) min = std::min(min, static_cast<double>(value));
-  const double density = 1.0;
-  const double span = std::ceil(-min*density);
-  return {static_cast<size_t>(span), static_cast<Y>(density), floor};
+Qtz<Y> ydb(const vvec<Y>& channel, Y floor) {
+  double y0 = 0.0;
+  for (const vec<Y>& row : channel)
+    for (Y val : row)
+      if (std::isfinite(val)) y0 = std::min<double>(y0, val);
+  const Y      density = 1.0;
+  const size_t n       = std::ceil(-y0 * density);
+  return {n, density, floor};
 }
 
 template <typename Y>
-Quantization<Y> y_db(const std::vector<std::vector<Y>>& channel, const Quantization<Y>& parent) {
-  return y_db(channel, parent.offset);
+Qtz<Y> ydb(const vvec<Y>& ch, const Qtz<Y>& parent) {
+  return ydb(ch, parent.pos);
 }
 
 template <typename X, typename Y, typename Z>
-std::span<Y> channel(const Spectrogram<X, Y, Z>& spectrum, size_t c) {
-  return std::span<Y>(spectrum.channel[c], spectrum.x_ms.extent*spectrum.z_hz.extent);
+std::span<Y> ch(const Spectrum<X, Y, Z>& env, size_t c) {
+  return std::span<Y>(env.ch[c], env.qx.n * env.qz.n);
 }
 
 template <typename X, typename Y, typename Z>
-Spectrogram<X, Y, Z> as_spectrogram(std::vector<std::vector<Y>>& channel, Quantization<X> x_ms,
-                                    Quantization<Z> z_hz, Quantization<Y> y_db) {
-  Spectrogram<X, Y, Z> spectrum;
-  for (std::vector<Y>& row : channel) spectrum.channel.push_back(row.data());
-  spectrum.x_ms = x_ms;
-  spectrum.z_hz = z_hz;
-  spectrum.y_db = y_db;
+Spectrum<X, Y, Z> as_spectrum(vvec<Y>& ch, Qtz<X> qx, Qtz<Y> qy, Qtz<Z> qz) {
+  Spectrum<X, Y, Z> spectrum;
+  for (vec<Y>& row : ch) spectrum.ch.push_back(row.data());
+  spectrum.qx = qx;
+  spectrum.qy = qy;
+  spectrum.qz = qz;
   return spectrum;
 }
 
+template <typename X, typename Y, typename Z, typename S>
+Spectrum<X, Y, Z> xc_spectrum(const vec<S>& xc, size_t nc, X hz, std::type_identity_t<X> x0,
+                              Qtz<Y> qy, Qtz<Z> qz, vvec<Y>& amp) {
+  const size_t nx = xc.size() / nc;
+  const Qtz<X> qx{nx, hz, x0};
+  amp = ch_amp<Y>(xc, nc);
+  return as_spectrum(amp, qx, qy, qz);
+}
+}
+
+namespace qstorm {
+using algorithm::ms;
+using algorithm::Qtz;
+using algorithm::Spectrum;
+using algorithm::zvec;
+using Level = Spectrum<double, float, double>;
 }

@@ -1,73 +1,56 @@
 #pragma once
-#include <cstddef>
 #include <optional>
 #include <variant>
-#include <vector>
 
 #include "algorithm/axis_quantizer.h"
 #include "algorithm/sim_drift.h"
 #include "algorithm/sim_waveform.h"
-#include "atom/atom_thunder.h"
 
 namespace qstorm::atom {
 
-struct Domain {
-  using Factor = thunder::Factor;
-  using Root = thunder::Root;
-};
-
 struct Spectral {
-  algorithm::Drift center;
-  algorithm::Drift spread;
-  algorithm::Drift shape;
-  algorithm::Drift flatness;
+  double peak;      // highest power density
+  double center;    // power-weighted centroid
+  double spread;    // power-weighted standard deviation around center
+  double low;       // lowest bin at the spectrum's level
+  double high;      // highest bin at the spectrum's level
+  double tilt;      // power density dB per octave
+  double flatness;  // geometric over arithmetic mean of the power density
 };
 
 struct ADSR {
-  size_t time;
-  double attack_ms;
-  size_t peak;
-  std::optional<double> decay_ms;
-  std::optional<double> sustain;
-  double release_ms;
-  size_t end;
-  int energy;
+  ms<double>                x0;
+  ms<double>                attack;
+  ms<double>                peak;
+  std::optional<ms<double>> decay;
+  std::optional<double>     sustain;
+  ms<double>                release;
+  ms<double>                x1;
+  double                    energy;
+  double                    slope;
+  ms<double>                center;
 };
 
 struct Transient {
-  double prominence_db;
-  double ms;
-  ADSR adsr;
-  Spectral spectral;
+  double           prominence;
+  double           ms;
+  ADSR             adsr;
+  Spectral         spectral;
   algorithm::Locus locus;
 };
 
 template <typename T>
 struct Series {
-  std::vector<T> step;
+  vec<T>           step;
   algorithm::Locus locus;
   algorithm::Drift envelope;
 };
 
 struct Raw {
-  std::vector<double> value;
-  algorithm::Quantization<double> axis;
+  vec<>       val;
+  Qtz<double> axis;
 };
 
-using Component = std::variant<
-Raw, Spectral, algorithm::Drift, ADSR, algorithm::Locus, Series<Spectral>, Series<algorithm::Drift>
->;
-
-struct Atom {
-  std::optional<Domain> domain;
-  std::vector<Component> component;
-  std::vector<Atom> atom;
-};
-
-template <typename D>
-auto extract_root_atom(const algorithm::Spectrogram<double>& window, const D& dna) {
-  thunder::window = window;
-  return root(dna);
-}
-
+using Component = std::variant<Raw, Spectral, algorithm::Drift, ADSR, algorithm::Locus,
+                               Series<Spectral>, Series<algorithm::Drift>>;
 }

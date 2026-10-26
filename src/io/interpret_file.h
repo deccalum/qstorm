@@ -1,80 +1,79 @@
 #pragma once
 
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <fstream>
 #include <span>
-#include <string>
+#include <type_traits>
 #include <vector>
 
 #include "algorithm/axis_quantizer.h"
 #include "io/bridge.h"
 
 namespace qstorm::io {
+pcmvec         flac_decode(std::span<const std::byte> bytes, int bit_depth);
+vec<std::byte> flac_encode(pcmspan xc, size_t nc, double hz);
 
-void decode_flac(std::span<const std::byte> bytes);
-void decode_flac_range(const std::string& path, double start, double end);
-std::vector<std::byte> encode_flac(std::span<const env::pcm::shifted> interleaved, size_t count, int hz);
-
-inline void write_bytes(const std::string& path, std::span<const std::byte> bytes) {
-  std::ofstream file(path, std::ios::binary);
-  file.write(reinterpret_cast<const char*>(bytes.data()),
-             static_cast<std::streamsize>(bytes.size()));
+template <typename T>
+void append_value(vec<std::byte>& bytes, const T& value) {
+  const std::byte* first = reinterpret_cast<const std::byte*>(&value);
+  bytes.insert(bytes.end(), first, first + sizeof value);
 }
 
 template <typename X, typename Y, typename Z>
-void write_spectrogram(std::ofstream& file, const algorithm::Spectrogram<X, Y, Z>& spectrum) {
-  const uint64_t count = spectrum.channel.size();
-  file.write(reinterpret_cast<const char*>(&spectrum.x_ms), sizeof spectrum.x_ms);
-  file.write(reinterpret_cast<const char*>(&spectrum.y_db), sizeof spectrum.y_db);
-  file.write(reinterpret_cast<const char*>(&spectrum.z_hz), sizeof spectrum.z_hz);
-  file.write(reinterpret_cast<const char*>(&count), sizeof count);
-  for (size_t c = 0; c < count; ++c) {
-    const std::span<Y> plane = algorithm::channel(spectrum, c);
-    file.write(reinterpret_cast<const char*>(plane.data()),
-               static_cast<std::streamsize>(plane.size_bytes()));
+void append_spectrum(vec<std::byte>& bytes, const Spectrum<X, Y, Z>& spectrum) {
+  const uint64_t nc = spectrum.ch.size();
+  append_value(bytes, spectrum.qx);
+  append_value(bytes, spectrum.qy);
+  append_value(bytes, spectrum.qz);
+  append_value(bytes, nc);
+  for (size_t c = 0; c < nc; ++c) {
+    const std::span<const std::byte> plane = std::as_bytes(algorithm::ch(spectrum, c));
+    bytes.insert(bytes.end(), plane.begin(), plane.end());
   }
 }
 
-template <typename X, typename Y, typename Z>
-algorithm::Spectrogram<X, Y, Z> read_spectrogram(const std::byte*& at) {
-  algorithm::Spectrogram<X, Y, Z> spectrum;
-  uint64_t count;
-  std::memcpy(&spectrum.x_ms, at, sizeof spectrum.x_ms);
-  at += sizeof spectrum.x_ms;
-  std::memcpy(&spectrum.y_db, at, sizeof spectrum.y_db);
-  at += sizeof spectrum.y_db;
-  std::memcpy(&spectrum.z_hz, at, sizeof spectrum.z_hz);
-  at += sizeof spectrum.z_hz;
-  std::memcpy(&count, at, sizeof count);
-  at += sizeof count;
-  const size_t plane = spectrum.x_ms.extent * spectrum.z_hz.extent * sizeof(Y);
-  for (uint64_t c = 0; c < count; ++c) {
-    spectrum.channel.push_back(const_cast<Y*>(reinterpret_cast<const Y*>(at)));
+template <typename S>
+S read_spectrum(const std::byte*& at) {
+  using Y = std::remove_pointer_t<typename decltype(S::ch)::value_type>;
+  S        spectrum;
+  uint64_t nc;
+  std::memcpy(&spectrum.qx, at, sizeof spectrum.qx);
+  at += sizeof spectrum.qx;
+  std::memcpy(&spectrum.qy, at, sizeof spectrum.qy);
+  at += sizeof spectrum.qy;
+  std::memcpy(&spectrum.qz, at, sizeof spectrum.qz);
+  at += sizeof spectrum.qz;
+  std::memcpy(&nc, at, sizeof nc);
+  at += sizeof nc;
+  const size_t plane = spectrum.qx.n * spectrum.qz.n * sizeof(Y);
+  for (uint64_t c = 0; c < nc; ++c) {
+    spectrum.ch.push_back(const_cast<Y*>(reinterpret_cast<const Y*>(at)));
     at += plane;
   }
   return spectrum;
 }
 
-template <typename X, typename Y, typename Z>
-std::vector<algorithm::Spectrogram<X, Y, Z>> map_spectrogram(const std::string& path) {
-  const int fd = ::open(path.c_str(), O_RDONLY);
-  struct stat info;
-  ::fstat(fd, &info);
-  const size_t size = static_cast<size_t>(info.st_size);
-  void* mapped = ::mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
-  ::close(fd);
-  const std::byte* at = static_cast<const std::byte*>(mapped);
-  const std::byte* end = at + size;
-  std::vector<algorithm::Spectrogram<X, Y, Z>> spectra;
-  while (at < end) spectra.push_back(read_spectrogram<X, Y, Z>(at));
-  return spectra;
+template <typename T>
+vec<std::byte> to_bytes(const T& value) {
+  vec<std::byte> bytes;
+  if constexpr (requires { typename T::value_type; })
+    for (const typename T::value_type& each : value) append_spectrum(bytes, each);
+  else
+    append_spectrum(bytes, value);
+  return bytes;
 }
 
+template <typename T>
+T from_bytes(std::span<const std::byte> bytes) {
+  const std::byte* at = bytes.data();
+  if constexpr (requires { typename T::value_type; }) {
+    const std::byte* end = at + bytes.size();
+    T                spectra;
+    while (at < end) spectra.push_back(read_spectrum<typename T::value_type>(at));
+    return spectra;
+  } else {
+    return read_spectrum<T>(at);
+  }
+}
 }

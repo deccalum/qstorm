@@ -6,159 +6,78 @@
 #include <cstdlib>
 #include <functional>
 #include <iterator>
-#include <limits>
-#include <numeric>
-#include <optional>
 #include <ranges>
 #include <span>
 #include <vector>
 
 #include "algorithm/axis_quantizer.h"
-#include "algorithm/math_constant.h"
 #include "algorithm/math_scalar.h"
 
 namespace qstorm::algorithm {
-
-template <typename T>
-size_t centroid_index(std::span<const T> t) {
-  const double  mean = average(t, std::identity{});
-  double       total = 0.0;
-  size_t           n = 0;
-  for (size_t i = 0; i < t.size(); ++i) {
-    if (t[i] < mean) continue;
-    total += static_cast<double>(i);
-    ++n;
-  }
-  return static_cast<size_t>(total / static_cast<double>(n));
-}
-
 template <std::ranges::forward_range R, typename F>
-std::vector<double> window(R&& r, size_t w, F f) {
-  std::vector<double> reduced;
-  for (auto&& slice : r | std::views::slide(w)) reduced.push_back(f(slice));
+vec<> window(R&& r, size_t w, F fn) {
+  vec reduced;
+  for (auto&& slice : r | std::views::slide(w)) reduced.push_back(fn(slice));
   return reduced;
 }
 
 template <std::ranges::random_access_range R>
-std::vector<double> trailing_percentile(R&& r, size_t w, double fraction) {
-  const size_t n = static_cast<size_t>(std::ranges::size(r));
-  w = std::min(w, n);
-  std::vector<double> series(n);
+vec<> trailing_percentile(R&& r, size_t w, double fraction) {
+  const size_t n = std::ranges::size(r);
+  w              = std::min(w, n);
+  vec serie(n);
   for (size_t i = w - 1; i < n; ++i) {
     auto tail = r | std::views::drop(i + 1 - w) | std::views::take(w);
-    series[i] = percentile(tail, fraction);
+    serie[i]  = percentile(tail, fraction);
   }
-  for (size_t i = 0; i + 1 < w; ++i) series[i] = series[w - 1];
-  return series;
+  for (size_t i = 0; i + 1 < w; ++i) serie[i] = serie[w - 1];
+  return serie;
 }
 
 template <std::ranges::forward_range L, std::ranges::forward_range R>
-double side_ratio(L&& l, R&& r) {
-  double  energy_mid = 0.0;
-  double energy_side = 0.0;
-  for (auto&& [a, b] : std::views::zip(l, r)) {
-    const double  mid = 0.5 * (static_cast<double>(a) +static_cast<double>(b));
-    const double side = 0.5 * (static_cast<double>(a) -static_cast<double>(b));
-    energy_mid  += mid*mid;
-    energy_side += side*side;
+double side_ratio(L&& left, R&& right) {
+  double nrg_mid  = 0.0;
+  double nrg_side = 0.0;
+  for (auto&& [a, b] : std::views::zip(left, right)) {
+    const double l    = a;
+    const double r    = b;
+    const double mid  = (l + r) / 2;
+    const double side = (l - r) / 2;
+    nrg_mid += mid * mid;
+    nrg_side += side * side;
   }
-  return energy_side / (energy_mid + energy_side);
+  return nrg_side / (nrg_mid + nrg_side);
 }
 
 template <std::ranges::forward_range L, std::ranges::forward_range R>
-double energy_balance(L&& l, R&& r) {
-  double energy_l = 0.0;
-  double energy_r = 0.0;
-  for (auto&& [a, b] : std::views::zip(l, r)) {
-    energy_l += std::abs(static_cast<double>(a));
-    energy_r += std::abs(static_cast<double>(b));
+double energy_balance(L&& left, R&& right) {
+  double nrg_l = 0.0;
+  double nrg_r = 0.0;
+  for (auto&& [a, b] : std::views::zip(left, right)) {
+    const double left  = a;
+    const double right = b;
+    nrg_l += std::abs(left);
+    nrg_r += std::abs(right);
   }
-  return energy_r / (energy_l + energy_r);
+  return nrg_r / (nrg_l + nrg_r);
 }
 
-template <std::ranges::input_range R, typename P, typename M>
-std::optional<double> otsus_method(R&& r, P p, M m, double min_significance) {
-  std::vector<double> v;
-  for (auto&& e : r) {
-    const double x = m.fwd(std::invoke(p, e));
-    if (!std::isfinite(x)) continue;
-    v.push_back(x);
-  }
-  std::ranges::sort(v);
-  const size_t          n = v.size();
-  std::optional<double> result;
-  if (n >= 4) {
-    const std::vector<double> cumulative = qstorm::algorithm::running_total(v, std::identity{});
-    const double total = cumulative.back();
-
-    size_t best_i = 1;
-    double best_between = -1.0;
-    for (size_t i = 1; i < n; ++i) {
-      const double      w0 = static_cast<double>(i) / static_cast<double>(n);
-      const double      m0 = cumulative[i] / static_cast<double>(i);
-      const double      m1 = (total - cumulative[i]) / static_cast<double>(n - i);
-      const double   delta = m0 - m1;
-      const double  weight = w0 * (1.0 - w0);
-      const double between = weight*delta*delta;
-      if (between > best_between) {
-        best_between = between;
-        best_i = i;
-      }
-    };
-
-    const double v0 = qstorm::algorithm::variance(v | std::views::take(best_i), std::identity{}, 0);
-    const double v1 = qstorm::algorithm::variance(v | std::views::drop(best_i), std::identity{}, 0);
-    const double w0 = v0*static_cast<double>(best_i);
-    const double w1 = v1*static_cast<double>(n - best_i);
-    const double       within = (w0 + w1) / static_cast<double>(n);
-    const double significance = within > k::Epsilon
-                              ? best_between / within
-                              : std::numeric_limits<double>::infinity();
-    if (significance >= min_significance) {
-      const double mid = std::midpoint(v.at(best_i - 1), v.at(best_i));
-      result = m.inv(mid);
-    }
-  }
-  return result;
-}
-
-template <std::ranges::input_range R, typename P, typename Typical, typename M> std::optional<double>
-widest_gap_threshold(R&& r, P p, Typical typical_of, M m, double factor, double search_fraction) {
-  std::vector<double> v;
-  for (auto&& e : r) {
-    const double x = m.fwd(std::invoke(p, e));
-    if (!std::isfinite(x)) continue;
-    v.push_back(x);
-  }
-  std::ranges::sort(v);
-  const size_t          n = v.size();
-  std::optional<double> result;
-  if (n >= 4) {
-    const std::vector<double> gap = qstorm::algorithm::difference(v, std::identity{});
-    const size_t w
-      = std::max<size_t>(1, static_cast<size_t>(search_fraction*static_cast<double>(gap.size())));
-    const size_t peak = qstorm::algorithm::argmax(gap | std::views::take(w));
-
-    const double typical = typical_of(gap);
-    if (gap[peak] >= factor*typical) result = m.inv(0.5 * (v.at(peak) + v.at(peak + 1)));
-  }
-  return result;
-}
-
-template <std::ranges::random_access_range Mask>
-std::vector<size_t> sustain_edge(Mask&& mask, size_t hold, size_t refractory) {
+template <std::ranges::random_access_range M>
+vec<size_t> sustain_edge(M&& mask, size_t hold, size_t refractory) {
   const auto   m = std::ranges::begin(mask);
-  const size_t n = static_cast<size_t>(std::ranges::size(mask));
-  std::vector<size_t> hit;
-  long last = -static_cast<long>(refractory);
+  const size_t n = std::ranges::size(mask);
+  vec<size_t>  hit;
+  const long   space = refractory;
+  long         i0    = -space;
 
   size_t i = 0;
   while (i < n) {
-    const long since = static_cast<long>(i) - last;
-    const bool ready = since >= static_cast<long>(refractory);
+    const long at    = i;
+    const long since = at - i0;
+    const bool ready = since >= space;
     if (m[i] && ready) {
       const size_t hold_end = std::min(n, i + hold);
-      bool         held = true;
+      bool         held     = true;
       for (size_t j = i; j < hold_end; ++j) {
         if (!m[j]) {
           held = false;
@@ -167,7 +86,7 @@ std::vector<size_t> sustain_edge(Mask&& mask, size_t hold, size_t refractory) {
       }
       if (held) {
         hit.push_back(i);
-        last = static_cast<long>(i);
+        i0 = i;
         i += refractory;
         continue;
       }
@@ -177,113 +96,67 @@ std::vector<size_t> sustain_edge(Mask&& mask, size_t hold, size_t refractory) {
   return hit;
 }
 
-constexpr double iou(double a0, double a1, double b0, double b1) {
-  const double inter = std::min(a1, b1) - std::max(a0, b0);
-  const double   uni = std::max(a1, b1) - std::min(a0, b0);
-  return (inter <= 0.0 || uni <= 0.0) ? 0.0 : inter / uni;
+template <typename X, typename Y, typename Z>
+Spectrum<X, Y, Z> moving_average(const Spectrum<X, Y, Z>& env, X dx, vvec<Y>& ch) {
+  const size_t nx     = env.qx.n;
+  const size_t radius = env.qx.frame(dx);
+  const vec    tot    = run_sum(std::span<const Y>(env.ch.front(), nx), std::identity{});
+  ch.assign(1, vec<Y>(nx));
+  vec<Y>& smooth = ch.front();
+  for (size_t i = 0; i < nx; ++i) {
+    const size_t i0 = i >= radius ? i - radius : 0;
+    const size_t i1 = std::min(nx, i + radius + 1);
+    const double n  = i1 - i0;
+    smooth[i]       = (tot[i1] - tot[i0]) / n;
+  }
+  return as_spectrum(ch, env.qx, env.qy, env.qz);
 }
 
-template <typename X, typename Y, typename Z> Spectrogram<X, Y, Z>
-moving_average(const Spectrogram<X, Y, Z>& env, X half, std::vector<std::vector<Y>>& channel) {
-  channel.assign(1, std::vector<Y>());
-  std::vector<Y>&           smooth = channel.front();
-  const Spectrogram<X, Y, Z> reach = env.window(env.begin(), env.begin() + half);
-  const X                     snap = reach.end() - reach.begin();
-  for (ms<X> x = env.begin(); x < env.end(); ++x) {
-    ms<X> next{x + snap, &env.x_ms};
-    ++next;
-    const X lo = std::max<X>(x - snap, env.begin());
-    const X hi = std::min<X>(next, env.end());
-    const Spectrogram<X, Y, Z> slice = env.window(lo, hi);
-    double total = 0;
-    size_t     n = 0;
-    for (ms<X> slice_x = slice.begin(); slice_x < slice.end(); ++slice_x) {
-      total += slice[slice_x];
-      n++;
-    }
-    smooth.push_back(static_cast<Y>(total / static_cast<double>(n)));
+inline vec<> periodic_hann(size_t n) {
+  vec hann;
+  for (size_t i = 0; i < n; ++i) {
+    const double theta = k::tau * i / n;
+    hann.push_back((1.0 - std::cos(theta) / 2));
   }
-  return as_spectrogram(channel, env.x_ms, env.z_hz, env.y_db);
+  return hann;
 }
 
 template <std::ranges::random_access_range X, std::ranges::random_access_range Y, typename P>
 long peak_lag(X&& x, Y&& y, long max_lag, P p) {
   const auto xs = std::ranges::begin(x);
   const auto ys = std::ranges::begin(y);
-  const long  n = static_cast<long>(std::ranges::size(x));
+  const long n  = std::ranges::size(x);
 
-  double energy_x = 0.0;
+  double nrg_x = 0.0;
   for (auto&& e : x) {
-    const double v = static_cast<double>(std::invoke(p, e));
-    energy_x += v*v;
+    const double v = std::invoke(p, e);
+    nrg_x += v * v;
   }
 
-  double energy_y = 0.0;
+  double nrg_y = 0.0;
   for (auto&& e : y) {
-    const double v = static_cast<double>(std::invoke(p, e));
-    energy_y += v*v;
+    const double v = std::invoke(p, e);
+    nrg_y += v * v;
   }
-  const double norm = std::sqrt(energy_x*energy_y);
+  const double norm = std::sqrt(nrg_x * nrg_y);
 
-  long  peak = 0;
-  double top = -2.0;
+  long   arg = 0;
+  double y1  = -2.0;
   for (long lag = -max_lag; lag <= max_lag; ++lag) {
-    const long lo = std::max<long>(0, -lag);
-    const long hi = std::min(n, n - lag);
-    double  total = 0.0;
-    for (long i = lo; i < hi; ++i) {
-      const double a = static_cast<double>(std::invoke(p, xs[i]));
-      const double b = static_cast<double>(std::invoke(p, ys[i + lag]));
-      total += a*b;
+    const long i0    = std::max<long>(0, -lag);
+    const long i1    = std::min(n, n - lag);
+    double     tot   = 0.0;
+    for (long i = i0; i < i1; ++i) {
+      const double a = std::invoke(p, xs[i]);
+      const double b = std::invoke(p, ys[i + lag]);
+      tot += a * b;
     }
-    const double value = total / norm;
-    if (value > top) {
-      top  = value;
-      peak = lag;
-    }
-  }
-  return peak;
-}
-
-template <std::ranges::random_access_range X, std::ranges::random_access_range Y>
-size_t chord_peak(X&& x, Y&& y, size_t lo, size_t hi) {
-  const double  dx = x[hi] - x[lo];
-  const double  dy = y[hi] - y[lo];
-  const double len = std::hypot(dx, dy);
-  size_t      peak = lo + 1;
-  double       top = 0.0;
-  for (size_t i = lo + 1; i < hi; i++) {
-    const double distance = std::abs(dx * (y[i] - y[lo]) - dy * (x[i] - x[lo])) / len;
-    if (distance > top) {
-      top = distance;
-      peak = i;
+    const double value = tot / norm;
+    if (value > y1) {
+      y1  = value;
+      arg = lag;
     }
   }
-  return peak;
+  return arg;
 }
-
-template <std::ranges::random_access_range X, std::ranges::random_access_range Y>
-void rdp_split(X&& x, Y&& y, double tolerance, std::vector<size_t>& vertex, size_t lo, size_t hi) {
-  if (hi > lo + 1) {
-    const size_t peak = chord_peak(x, y, lo, hi);
-    const double  dx = x[hi] - x[lo];
-    const double  dy = y[hi] - y[lo];
-    const double len = std::hypot(dx, dy);
-    const double distance = std::abs(dx * (y[peak] - y[lo]) - dy * (x[peak] - x[lo])) / len;
-    if (distance > tolerance) {
-      vertex.push_back(peak);
-      rdp_split(x, y, tolerance, vertex, lo, peak);
-      rdp_split(x, y, tolerance, vertex, peak, hi);
-    }
-  }
-}
-
-template <std::ranges::random_access_range X, std::ranges::random_access_range Y>
-std::vector<size_t> rdp(X&& x, Y&& y, double tolerance) {
-  std::vector<size_t> vertex{0, std::ranges::size(x) - 1};
-  rdp_split(x, y, tolerance, vertex, size_t{0}, vertex.back());
-  std::ranges::sort(vertex);
-  return vertex;
-}
-
 }

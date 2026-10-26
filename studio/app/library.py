@@ -1,4 +1,6 @@
 from __future__ import annotations
+import csv
+import io
 import struct
 from dataclasses import dataclass
 from datetime import datetime
@@ -36,18 +38,53 @@ def entry(table: Table, index: int, second: bool, kind: str) -> Any:
         text = table.cell(index, i, False, second)
         if text is not None: texts.append(text)
     return line(texts, kind)
-def listing(list_element: Any, sources: Table, windows: dict[int, Table], second: bool, active: int | None, chosen: int | None) -> None:
-    top = heading(sources)
-    list_element.style.setProperty("--columns", str(top.childElementCount))
-    list_element.replaceChildren(top)
-    for i in range(len(sources.row)):
+@dataclass
+class Summary:
+    windows: int
+    atomized: int
+
+def arrow(name: str, sort: tuple[str, int]) -> Any:
+    button = js.document.createElement("button")
+    button.type = "button"
+    button.dataset.sort = name
+    button.className = "sorted" if sort[0] == name else ""
+    button.append(name + " ")
+    mark = js.document.createElement("i")
+    mark.textContent = ("▲" if sort[1] > 0 else "▼") if sort[0] == name else "↕"
+    button.append(mark)
+    return button
+def visible_column(sources: Table, hidden: set[str]) -> list[int]:
+    shown = []
+    for i, column in enumerate(sources.column):
+        if sources.shown(i, False) and column.name not in hidden: shown.append(i)
+    return shown
+def extraction_index(roots: Table, row: list[Value]) -> tuple[int, int]:
+    return integer(row[roots.name.index("extraction")]), integer(row[roots.name.index("index")])
+def browse(list_element: Any, sources: Table, summary: dict[int, Summary], order: list[int], active: int | None,
+           roots: Table | None, chosen: int | None, second: bool, sort: tuple[str, int], hidden: set[str],
+           editing: bool, checked: set[tuple[int, int]]) -> None:
+    shown = visible_column(sources, hidden)
+    table = js.document.createElement("div")
+    table.className = "table"
+    table.style.setProperty("--columns", str(len(shown) + 2))
+    top = js.document.createElement("div")
+    top.className = "line heading"
+    for i in shown: top.append(arrow(sources.column[i].name, sort))
+    top.append(arrow("windows", sort), arrow("atomized", sort))
+    table.append(top)
+    for i in order:
         source_id = sources.key_cells(sources.row[i])[0]
-        rec = entry(sources, i, second, "rec")
+        counted = summary[source_id]
+        texts = []
+        for column in shown:
+            text = sources.cell(i, column, False, second)
+            texts.append("-" if text is None else text)
+        texts += [str(counted.windows or "–"), str(counted.atomized or "–")]
+        rec = line(texts, "rec")
         rec.dataset.source = str(i)
-        rec.classList.toggle("active", i == active)
-        list_element.append(rec)
-        roots = windows.get(source_id)
-        if roots is None: continue
+        rec.classList.toggle("chosen", i == active)
+        table.append(rec)
+        if i != active or roots is None or not roots.row: continue
         inner = js.document.createElement("div")
         inner.className = "windows"
         names = heading(roots)
@@ -56,12 +93,33 @@ def listing(list_element: Any, sources: Table, windows: dict[int, Table], second
         rejected = roots.name.index("rejected")
         for j in range(len(roots.row)):
             window = entry(roots, j, second, "window")
+            if editing:
+                box = js.document.createElement("i")
+                box.className = "check"
+                window.firstChild.prepend(box)
+            window.classList.toggle("checked", extraction_index(roots, roots.row[j]) in checked)
             window.classList.toggle("rejected", bool(roots.row[j][rejected]))
             window.dataset.source = str(i)
             window.dataset.window = str(j)
-            window.classList.toggle("active", i == active and j == chosen)
+            window.classList.toggle("active", j == chosen)
             inner.append(window)
-        list_element.append(inner)
+        table.append(inner)
+    list_element.replaceChildren(table)
+def source_csv(sources: Table, summary: dict[int, Summary], order: list[int], hidden: set[str], second: bool) -> str:
+    shown = visible_column(sources, hidden)
+    text = io.StringIO()
+    writer = csv.writer(text)
+    names = []
+    for i in shown: names.append(sources.column[i].name)
+    writer.writerow(names + ["windows", "atomized"])
+    for i in order:
+        counted = summary[sources.key_cells(sources.row[i])[0]]
+        cells = []
+        for column in shown:
+            found = sources.cell(i, column, False, second)
+            cells.append("" if found is None else found)
+        writer.writerow(cells + [counted.windows, counted.atomized])
+    return text.getvalue()
 
 @dataclass
 class Column:
@@ -222,6 +280,11 @@ class Table:
         names = []
         for i, each in enumerate(self.column):
             if each.unit == "ms" and self.shown(i, True): names.append(each.name)
+        return names
+    def real_name(self) -> list[str]:
+        names = []
+        for i, each in enumerate(self.column):
+            if each.type == "float8" and each.unit == "" and self.shown(i, False): names.append(each.name)
         return names
     def units(self) -> list[str]:
         found = []

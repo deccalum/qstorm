@@ -8,37 +8,35 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <concepts>
 #include <cstddef>
 #include <format>
 #include <span>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "algorithm/axis_quantizer.h"
 #include "io/bridge.h"
 
 namespace qstorm::io::player {
 
-inline int fd = -1;
-inline size_t last_count = 0;
-inline size_t last_sample = 0;
+inline bool   opened      = false;
+inline size_t last_nc     = 0;
+inline double last_sample = 0.0;
 
-template <typename T>
 struct Sink {
   const env::ProcessArg& profile;
-  mutable pid_t pid = 0;
+  mutable pid_t          pid = 0;
+  mutable int            fd  = -1;
 
-  int open() const {
+  void open(double hz, size_t nc) const {
     int pipe_fd[2];
     ::pipe(pipe_fd);
-    std::vector<std::string> word = env::pw_cat::words<T>(profile);
-    pid = spawn(word, pipe_fd[0], STDIN_FILENO, pipe_fd[1]);
-    return pipe_fd[1];
+    vec<std::string> word = env::ffplay::words<env::pcm::shifted>(profile, hz, nc);
+    pid                   = spawn(word, pipe_fd[0], STDIN_FILENO, pipe_fd[1]);
+    fd                    = pipe_fd[1];
   }
 
-  void write(int fd, std::span<const T> block, size_t) const {
+  void write(pcmspan block) const {
     const std::span<const std::byte> byte = std::as_bytes(block);
     for (size_t sent = 0; sent < byte.size();) {
       const ssize_t written = ::write(fd, byte.data() + sent, byte.size() - sent);
@@ -46,54 +44,25 @@ struct Sink {
     }
   }
 
-  void close(int fd) const {
+  void close() const {
     ::close(fd);
     waitpid(pid, nullptr, 0);
   }
 
-  void pause()  const { ::kill(pid, SIGSTOP); }
+  void pause() const { ::kill(pid, SIGSTOP); }
   void resume() const { ::kill(pid, SIGCONT); }
-  void abort()  const { ::kill(pid, SIGTERM); }
-  void gain()   const;
-};
 
-template <typename T>
-struct Source {
-  const env::ProcessArg& profile;
-  mutable pid_t pid = 0;
-
-  int open() const {
-    int pipe_fd[2];
-    ::pipe(pipe_fd);
-    std::vector<std::string> word = env::pw_cat::words<T>(profile);
-    pid = spawn(word, pipe_fd[1], STDOUT_FILENO, pipe_fd[0]);
-    return pipe_fd[0];
+  void abort() const {
+    ::kill(pid, SIGTERM);
+    ::kill(pid, SIGCONT);
   }
-
-  size_t read(int fd, std::span<T> block) const {
-    const std::span<std::byte> byte = std::as_writable_bytes(block);
-    size_t received = 0;
-    while (received < byte.size()) {
-      const ssize_t got = ::read(fd, byte.data() + received, byte.size() - received);
-      if (got == 0) break;
-      received += static_cast<size_t>(got);
-    }
-    return received / sizeof(T);
-  }
-
-  void close(int fd) const {
-    ::close(fd);
-    waitpid(pid, nullptr, 0);
-  }
-
-  void abort() const { ::kill(pid, SIGTERM); }
 };
 
 template <typename D, typename T>
-concept Device = requires(const D& d, int fd, std::span<const T> block, size_t count) {
-  { d.open() } -> std::same_as<int>;
-  d.write(fd, block, count);
-  d.close(fd);
+concept Device = requires(const D& d, std::span<const T> block, double hz, size_t nc) {
+  d.open(hz, nc);
+  d.write(block);
+  d.close();
   d.pause();
   d.resume();
   d.abort();
@@ -101,12 +70,12 @@ concept Device = requires(const D& d, int fd, std::span<const T> block, size_t c
 
 template <Device<env::pcm::shifted> D>
 void close(const D& device) {
-  if (fd >= 0) device.close(fd);
-  fd = -1;
+  if (opened) device.close();
+  opened = false;
 }
 
 template <typename Y>
-void report(const std::vector<algorithm::db<Y>>& level) {
+void report(const vec<algorithm::db<Y>>& level) {
   std::string text{env::control::level};
   for (const algorithm::db<Y>& each : level) text += std::format(" {:.1f}", each.y);
   text += '\n';
@@ -120,32 +89,33 @@ inline bool ready() {
 
 inline std::string line() {
   std::string text;
-  char each;
+  char        each;
   while (::read(STDIN_FILENO, &each, 1) == 1 && each != '\n') text += each;
   return text;
 }
 
-inline std::vector<std::string> words(const std::string& order) {
-  std::vector<std::string> found;
-  size_t first = 0;
-  while (first < order.size()) {
-    const size_t space = order.find(' ', first);
-    const size_t last = space == std::string::npos ? order.size() : space;
-    if (last > first) found.push_back(order.substr(first, last - first));
-    first = last + 1;
+inline vec<std::string> words(const std::string& order) {
+  vec<std::string> found;
+  size_t           i0 = 0;
+  while (i0 < order.size()) {
+    const size_t space = order.find(' ', i0);
+    const size_t i1    = space == std::string::npos ? order.size() : space;
+    if (i1 > i0) found.push_back(order.substr(i0, i1 - i0));
+    i0 = i1 + 1;
   }
   return found;
 }
 
 template <Device<env::pcm::shifted> D, typename Y>
 struct PlaybackControl {
-  const D& device;
-  algorithm::Quantization<Y> y;
-  size_t master;
-  std::vector<size_t> step;
-  bool mono;
-  std::array<algorithm::db<Y>, env::gain_step> volume =
-      algorithm::gain_step(y, std::make_index_sequence<env::gain_step>{});
+  const D&    device;
+  Qtz<Y>      qy;
+  size_t      master;
+  vec<size_t> step;
+  bool        mono;
+
+  std::array<algorithm::db<Y>, env::gain_step> volume
+    = algorithm::gain_step(qy, std::make_index_sequence<env::gain_step>{});
 
   Y linear(size_t at) const {
     if (at == 0) return 0;
@@ -154,19 +124,19 @@ struct PlaybackControl {
   }
 
   Y gain(size_t c) const {
-    const Y whole = linear(master);
+    const Y whole   = linear(master);
     const Y channel = linear(step[c]);
-    return whole*channel;
+    return whole * channel;
   }
 
-  std::vector<Y> gains() const {
-    std::vector<Y> each;
+  vec<Y> gains() const {
+    vec<Y> each;
     for (size_t c = 0; c < step.size(); ++c) each.push_back(gain(c));
     return each;
   }
 
   bool apply(const std::string& order) {
-    const std::vector<std::string> word = words(order);
+    const vec<std::string> word = words(order);
     if (word.empty()) return false;
     if (word[0] == env::control::master) {
       master = std::min<size_t>(std::stoul(word[1]), env::gain_step - 1);
@@ -174,7 +144,7 @@ struct PlaybackControl {
     }
     if (word[0] == env::control::volume) {
       const size_t c = std::stoul(word[1]);
-      step[c] = std::min<size_t>(std::stoul(word[2]), env::gain_step - 1);
+      step[c]        = std::min<size_t>(std::stoul(word[2]), env::gain_step - 1);
       return true;
     }
     if (word[0] == env::control::mono) {
@@ -188,10 +158,7 @@ struct PlaybackControl {
     device.pause();
     while (true) {
       const std::string order = line();
-      if (order == env::control::stop) {
-        device.resume();
-        return true;
-      }
+      if (order == env::control::stop) return true;
       if (order == env::control::pause) {
         device.resume();
         return false;
@@ -218,34 +185,42 @@ struct PlaybackControl {
 };
 
 template <Device<env::pcm::shifted> D, typename Y>
-bool play(const D& device, PlaybackControl<D, Y>& control) {
-  const algorithm::Quantization<double> x_ms{env::pcm::interleaved.size() / env::pcm::count, env::pcm::ms, 0.0};
-  if (fd < 0 || env::pcm::count != last_count || env::pcm::sample != last_sample) {
+bool play(const D& device, pcmspan xc, size_t nc, double hz, PlaybackControl<D, Y>& control) {
+  const Qtz<double> qx{xc.size() / nc, hz, 0.0};
+  if (!opened || nc != last_nc || hz != last_sample) {
     close(device);
-    fd = device.open();
-    last_count = env::pcm::count;
-    last_sample = env::pcm::sample;
+    device.open(hz, nc);
+    opened      = true;
+    last_nc     = nc;
+    last_sample = hz;
   }
-  const size_t block = x_ms.frame(env::play_block_ms);
-  const std::span<const env::pcm::shifted> interleaved(env::pcm::interleaved);
-  for (size_t t0 = 0; t0 < x_ms.extent; t0 += block) {
+  const size_t block = qx.frame(env::play_block);
+  for (size_t t0 = 0; t0 < qx.n; t0 += block) {
     if (control.interrupted()) return false;
-    const size_t frames = std::min(block, x_ms.extent - t0);
-    const std::span<const env::pcm::shifted> source = interleaved.subspan(t0*env::pcm::count, frames*env::pcm::count);
-    const std::vector<Y> gain = control.gains();
-    const std::vector<env::pcm::shifted> mixed = algorithm::mix<env::pcm::shifted, Y>(source, env::pcm::count, gain, control.mono);
-    const std::vector<Y> scale = algorithm::amplitude<Y>(mixed);
-    const std::vector<std::vector<Y>> channel = algorithm::deinterleave<Y>(scale, env::pcm::count);
-    std::vector<algorithm::db<Y>> level;
-    for (const std::vector<Y>& row : channel) {
-      const auto [lo, hi] = std::ranges::minmax(row);
-      const Y peak = std::max(-lo, hi);
-      level.push_back({algorithm::db<Y>::ratio(peak), &control.y});
+    const size_t  nx      = std::min(block, qx.n - t0);
+    const pcmspan source  = xc.subspan(t0 * nc, nx * nc);
+    const vec<Y>  gain    = control.gains();
+    const pcmvec  mixed   = algorithm::xc_mix<env::pcm::shifted, Y>(source, nc, gain, control.mono);
+    const vvec<Y> channel = algorithm::ch_amp<Y>(mixed, nc);
+    vec<algorithm::db<Y>> level;
+    for (const vec<Y>& row : channel) {
+      const auto [y0, y1] = std::ranges::minmax(row);
+      const Y peak        = std::max(-y0, y1);
+      level.push_back({algorithm::db<Y>::ratio(peak), &control.qy});
     }
     report(level);
-    device.write(fd, mixed, env::pcm::count);
+    device.write(mixed);
   }
   return true;
+}
+
+inline void stream(pcmspan xc, size_t nc, double hz, const Qtz<float>& qy) {
+  const Sink                   sink{env::playback_raw};
+  const size_t                 full = env::gain_step - 1;
+  PlaybackControl<Sink, float> control{sink, qy, full, vec<size_t>(nc, full), false};
+  const bool                   finished = play(sink, xc, nc, hz, control);
+  if (!finished) sink.abort();
+  close(sink);
 }
 
 }

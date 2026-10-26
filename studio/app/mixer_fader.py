@@ -21,9 +21,9 @@ def channels(pan: int, count: int) -> list[int]:
         step.append(round(FULL*gain))
     return step
 def percent(value: float, slider: Any) -> str:
-    lo = float(slider.min)
-    hi = float(slider.max)
-    share = (value - lo) / (hi - lo)
+    v0 = float(slider.min)
+    v1 = float(slider.max)
+    share = (value - v0) / (v1 - v0)
     return f"{round(share*100)}%"
 def balance(value: float, slider: Any) -> str:
     if value == 0: return "C"
@@ -32,10 +32,10 @@ def balance(value: float, slider: Any) -> str:
 FORMAT = {"percent": percent, "pan": balance}
 
 def paint(slider: Any) -> None:
-    lo = float(slider.min)
-    hi = float(slider.max)
+    v0 = float(slider.min)
+    v1 = float(slider.max)
     value = float(slider.value)
-    share = (value - lo) / (hi - lo) * 100
+    share = (value - v0) / (v1 - v0) * 100
     bipolar = slider.parentElement.classList.contains("bipolar")
     filled_from = min(50, share) if bipolar else 0
     filled_to = max(50, share) if bipolar else share
@@ -67,12 +67,12 @@ def nudge(event: Any) -> None:
     slider = fader.querySelector(RANGE)
     if slider is None: return
     event.preventDefault()
-    lo = float(slider.min)
-    hi = float(slider.max)
+    v0 = float(slider.min)
+    v1 = float(slider.max)
     percent_step = FINE if event.shiftKey else NUDGE
-    step = percent_step * (hi - lo) / 100
+    step = percent_step * (v1 - v0) / 100
     direction = -js.Math.sign(event.deltaY)
-    value = min(hi, max(lo, float(slider.value) + direction*step))
+    value = min(v1, max(v0, float(slider.value) + direction*step))
     commit(slider, str(round(value)))
 def install(on: Callable[..., None]) -> None:
     on(js.document, "input", moved, {"capture": True})

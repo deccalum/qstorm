@@ -29,9 +29,9 @@ class Player:
         self.channel: list[int] = []
         self.mono = False
         self.level: list[float] = []
-    def play(self, source_id: int, start: float, end: float) -> None:
+    def play(self, *argument: object) -> None:
         self.stop()
-        self.process = subprocess.Popen([str(BINARY), "play", str(source_id), str(start), str(end)], cwd=REPO_ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.process = subprocess.Popen([str(BINARY), *map(str, argument)], cwd=REPO_ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         reader = threading.Thread(target=self.listen, args=(self.process,), daemon=True)
         reader.start()
         self.send_mixer()
@@ -98,7 +98,7 @@ class Handler(SimpleHTTPRequestHandler):
         if route == "setting":
             self.send_bytes(json.dumps(setting(body["table"])).encode())
         if route == "play":
-            PLAYER.play(body["id"], body["start"], body["end"])
+            PLAYER.play("play_audio", body["audio"], body["offset"])
             self.send_bytes(b"")
         if route == "mixer":
             PLAYER.mixer(body["master"], body["channel"], body["mono"])

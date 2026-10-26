@@ -12,51 +12,40 @@
 </head>
 
 <body>
-  <div class="workspace">
-    <aside class="library">
-      <section class="panel list">
-        <header class="head">
-          <div class="segmented">
-            <button id="millisecond" type="button">ms</button>
-            <button id="second" type="button">sec</button>
-          </div>
-          <span class="fill"></span>
-          <button id="deleted" type="button">deleted</button>
-        </header>
-        <div id="list"></div>
-      </section>
-      <section class="panel">
-        <h2>source</h2>
-        <dl id="source-facts" class="pairs"></dl>
-      </section>
-    </aside>
-
-    <main class="stage">
-      <section class="panel wave">
-        <header class="head">
-          <h2>waveform</h2>
-          <span id="range" class="dim"></span>
-          <span id="density" class="dim"></span>
-          <span class="fill"></span>
-          <span id="status" class="bright"></span>
-        </header>
-        <div class="plot">
-          <div id="window-layer"></div>
-          <canvas id="wave"></canvas>
-        </div>
-        <div class="controls">
-          <div class="row">
-            <div class="toggles">
-              <button id="play" type="button">PLAY</button>
-              <button id="stop" type="button">STOP</button>
-              <button id="loop" type="button">LOOP</button>
-              <button id="follow" type="button">TRACK</button>
+  <div class="studio">
+    <section class="playback">
+      <div id="chrome" class="chrome">
+        <div>
+          <div class="toolbar">
+            <h2>playback</h2>
+            <span id="source-id" class="bright"></span>
+            <span id="status" class="bright"></span>
+            <div class="group">
+              <button id="play" type="button" class="primary key">▶</button>
+              <button id="stop" type="button" class="key">■</button>
             </div>
-            <div class="toggles">
-              <button id="compact" type="button">compact</button>
-              <button id="half" type="button">half</button>
-              <button id="rms" type="button">rms</button>
-              <button id="logarithmic" type="button">log</button>
+            <span id="clock" class="clock"></span>
+            <div class="group">
+              <button id="loop" type="button">loop</button>
+              <button id="follow" type="button">track</button>
+            </div>
+            <span id="target" class="dim fill"></span>
+            <span id="view-range" class="dim"></span>
+            <div class="group">
+              <button id="zoom-out" type="button" class="key">−</button>
+              <button id="center" type="button">all</button>
+              <button id="zoom-window" type="button">window</button>
+              <button id="zoom-in" type="button" class="key">+</button>
+            </div>
+          </div>
+
+          <div class="controls">
+            <div class="group">
+              <button id="compact" type="button" title="overlay channels in one lane">compact</button>
+              <button id="half" type="button" title="rectified half wave">half</button>
+              <button id="rms" type="button" title="rms envelope">rms</button>
+              <button id="logarithmic" type="button" title="logarithmic amplitude">log</button>
+              <button id="show-stft" type="button" title="show spectrum">stft</button>
               <select id="floor">
                 <option value="-36">-36 dB</option>
                 <option value="-48">-48 dB</option>
@@ -68,28 +57,21 @@
                 <option value="-145">-145 dB</option>
               </select>
             </div>
-            <span id="target" class="dim"></span>
-            <span id="selection" class="dim"></span>
-            <span class="fill"></span>
-            <div class="toggles">
-              <button id="zoom-out" type="button" class="key">−</button>
-              <button id="center" type="button">center</button>
-              <button id="zoom-window" type="button">window</button>
-              <button id="zoom-in" type="button" class="key">+</button>
-            </div>
-          </div>
-          <div class="row">
-            <div id="meter" class="meter">
+            <span class="fill detail-line">
+              <span id="source-detail" class="mid"></span>
+              <span id="range" class="dim"></span>
+            </span>
+            <div id="meter" class="meter" title="output level">
               <span></span><span></span>
             </div>
-            <label class="fader" for="master">
+            <label class="fader" for="master" title="volume, double click to reset">
               <span class="name">vol</span>
               <span class="rail">
                 <input id="master" type="range" min="0" max="499" value="499" data-format="percent">
-                </span>
+              </span>
               <output for="master"></output>
             </label>
-            <label class="fader" for="pan">
+            <label class="fader" for="pan" title="pan, double click to center">
               <span class="name">pan</span>
               <span class="end">L</span>
               <span class="rail bipolar"><input id="pan" type="range" min="-100" max="100" value="0"
@@ -97,45 +79,246 @@
               <span class="end">R</span>
               <output for="pan"></output>
             </label>
-            <div class="toggles">
+            <div class="group">
               <button id="mono" type="button">mono</button>
               <button id="normalize" type="button">normalize</button>
             </div>
           </div>
         </div>
-      </section>
+      </div>
 
-      <div class="lower">
-        <section class="panel telemetry">
-          <header class="head">
-            <h2>window</h2>
-            <span id="window-index" class="dim"></span>
-            <button id="extract" type="button" disabled>extract</button>
-            <button id="extract-selection" type="button" disabled>extract selection</button>
-            <button id="reject" type="button" disabled>reject</button>
-            <button id="previous" type="button" class="key">‹</button>
-            <button id="next" type="button" class="key">›</button>
-          </header>
-          <div class="axes">
-            <div>
-              <h3>x <span>ms</span></h3>
-              <div id="axis-x" class="fields"></div>
-            </div>
-            <div>
-              <h3>y <span>dB</span></h3>
-              <dl id="axis-y" class="pairs"></dl>
-            </div>
-            <div>
-              <h3><label for="factor">factor</label></h3>
-              <select id="factor"></select>
-              <dl id="factor-fields" class="pairs"></dl>
+      <div class="overview" title="overview, drag to pan">
+        <canvas id="overview"></canvas>
+      </div>
+
+      <div class="plots">
+        <div class="plot wave-plot">
+          <div id="window-layer"></div>
+          <canvas id="wave"></canvas>
+        </div>
+        <div id="spectrum-plot" class="plot spectrum">
+          <canvas id="stft"></canvas>
+          <div class="layer-key">
+            <span id="stft-key" class="dim"></span>
+            <div class="group">
+              <button type="button" data-layer="source" title="source">V</button>
+              <button type="button" data-layer="reconstruction" title="reconstruction">WH</button>
+              <button type="button" data-layer="residual" title="residual layer">V − WH</button>
             </div>
           </div>
-          <p id="window-key" class="dim"></p>
+        </div>
+        <div class="ticks">
+          <canvas id="ticks"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <main id="analysis" class="stage">
+      <div class="lower">
+        <section class="panel window">
+          <header class="head">
+            <h2>window</h2>
+            <div class="group">
+              <button id="previous" type="button" class="key">‹</button>
+              <span id="window-index" class="bright"></span>
+              <button id="next" type="button" class="key">›</button>
+            </div>
+            <span id="window-range" class="dim"></span>
+            <span class="fill"></span>
+            <button id="extract" type="button" class="raised" disabled>extract</button>
+            <button id="atomize" type="button" class="raised" disabled>atomize</button>
+            <span class="rule"></span>
+            <button id="reject" type="button" class="quiet" disabled>reject</button>
+          </header>
+          <div class="window-body">
+            <div>
+              <div class="figure shape">
+                <canvas id="shape"></canvas>
+              </div>
+              <div id="markers" class="markers"></div>
+            </div>
+            <div class="params">
+              <div>
+                <h3><label for="factor">factor</label><button id="copy-factor" type="button">copy</button></h3>
+                <select id="factor"></select>
+                <div id="factor-fields" class="fields"></div>
+              </div>
+              <div>
+                <h3><label for="ard">ard</label></h3>
+                <select id="ard"></select>
+                <dl id="ard-fields" class="pairs soft"></dl>
+              </div>
+            </div>
+          </div>
+          <p id="window-key" class="faint"></p>
         </section>
 
+        <section class="panel atomization">
+          <header class="head">
+            <h2>atomization</h2>
+            <span id="atomization-key" class="dim"></span>
+            <span class="fill"></span>
+            <div class="group">
+              <button type="button" data-tab="components">components</button>
+              <button type="button" data-tab="groups">groups</button>
+            </div>
+            <button id="analyze" type="button" class="raised" title="group the stored components" disabled>analyze</button>
+          </header>
+
+          <div class="summary">
+            <div>
+              <h3>run <span>phase one</span></h3>
+              <dl id="run" class="pairs"></dl>
+            </div>
+            <div>
+              <h3>divergence <span>/ iteration, log</span></h3>
+              <div class="figure trace">
+                <canvas id="trace"></canvas>
+              </div>
+              <div id="trace-axis" class="axis-row"></div>
+            </div>
+            <div>
+              <h3>residual <span>/ band</span></h3>
+              <div id="band-residual" class="band-residual"></div>
+            </div>
+            <div>
+              <h3>sets <span>phase two</span></h3>
+              <dl id="shape-facts" class="pairs"></dl>
+            </div>
+          </div>
+
+          <div class="split">
+            <div id="atom-table" class="atom-table"></div>
+            <div class="detail">
+              <header class="detail-head">
+                <span class="dot"></span>
+                <h3 id="detail-title"></h3>
+                <span id="detail-sub" class="dim"></span>
+                <span class="fill"></span>
+                <div class="group">
+                  <button id="solo" type="button" disabled>solo</button>
+                </div>
+              </header>
+              <div class="figures">
+                <figure>
+                  <div class="figure">
+                    <canvas id="detail-w"></canvas>
+                  </div>
+                  <figcaption><span>W · spectrum</span><span id="detail-w-range"></span></figcaption>
+                </figure>
+                <figure>
+                  <div class="figure">
+                    <canvas id="detail-h"></canvas>
+                  </div>
+                  <figcaption><span>H · activation</span><span id="detail-h-range"></span></figcaption>
+                </figure>
+              </div>
+              <div id="detail-sections" class="sections"></div>
+            </div>
+          </div>
+        </section>
       </div>
     </main>
+
+    <aside class="browser">
+      <div class="browser-bar">
+        <div class="browser-side">
+          <h2>browser</h2>
+          <button id="browser-view" type="button" class="raised view" data-view="expanded">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 6.5l3-3 3 3"></path></svg>
+            <span id="browser-view-name">expand</span>
+          </button>
+        </div>
+
+        <div id="browser-compact" class="neighbours">
+          <button id="previous-source" type="button" class="key">‹</button>
+          <div id="left-sources" class="fade left"></div>
+          <div class="current">
+            <span id="current-source" class="id"></span>
+            <span id="source-stats" class="stats"></span>
+          </div>
+          <div id="right-sources" class="fade right"></div>
+          <button id="next-source" type="button" class="key">›</button>
+        </div>
+
+        <div id="browser-filter" class="browser-filter" hidden>
+          <label class="search">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="5" r="3.5"></circle><path d="M8 8l3 3"></path></svg>
+            <input id="query" type="text" placeholder="id, title…">
+          </label>
+          <div class="group">
+            <button type="button" data-filter="windowed">has windows</button>
+            <button type="button" data-filter="atomized">atomized</button>
+          </div>
+          <span id="totals" class="dim"></span>
+        </div>
+
+        <div class="browser-side end">
+          <span id="position" class="faint"></span>
+          <button type="button" class="key settings" popovertarget="settings" title="settings">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1 3.5h2.2M6.8 3.5H13M1 10.5h6.2M10.8 10.5H13"></path><circle cx="5" cy="3.5" r="1.8"></circle><circle cx="9" cy="10.5" r="1.8"></circle></svg>
+          </button>
+          <div id="settings" class="menu" popover>
+            <div class="menu-label">view</div>
+            <div class="menu-item">
+              <span>time unit</span>
+              <div class="group">
+                <button type="button" data-unit="ms">ms</button>
+                <button type="button" data-unit="sec">sec</button>
+              </div>
+            </div>
+            <button type="button" class="menu-item" data-filter="deleted">
+              <span>show deleted</span>
+              <span class="switch"></span>
+            </button>
+            <div class="menu-rule"></div>
+            <div class="menu-label">table</div>
+            <button id="edit-table" type="button" class="menu-item">
+              <span>edit table</span>
+              <span class="switch"></span>
+            </button>
+            <button id="columns" type="button" class="menu-item">
+              <span>columns…</span>
+              <span id="column-count" class="menu-value"></span>
+            </button>
+            <div id="column-list" class="column-list" hidden></div>
+            <button id="export" type="button" class="menu-item">
+              <span>export csv</span>
+              <span id="export-count" class="menu-value"></span>
+            </button>
+            <div class="menu-rule"></div>
+            <div class="menu-label">database</div>
+            <button id="rescan" type="button" class="menu-item">
+              <span>rescan sources</span>
+              <span id="rescan-age" class="menu-value"></span>
+            </button>
+            <button id="reset" type="button" class="menu-item danger">
+              <span>reset database…</span>
+            </button>
+            <div id="reset-confirm" class="confirm" hidden>
+              <p>Deletes every extraction with its windows, stft, atomizations, components, residuals and groupings. Sources stay.</p>
+              <div class="confirm-actions">
+                <button id="reset-cancel" type="button" class="raised">cancel</button>
+                <button id="reset-run" type="button" class="danger">reset</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="browser-expanded" class="browser-expanded" hidden>
+        <div id="edit-bar" class="edit-bar" hidden>
+          <span class="dot"></span>
+          <span>editing · click a window row to select it</span>
+          <span class="fill"></span>
+          <span id="checked-count" class="dim"></span>
+          <button id="delete-checked" type="button" class="raised">delete</button>
+          <button id="restore-checked" type="button" class="raised">restore</button>
+          <button id="edit-done" type="button" class="primary">done</button>
+        </div>
+        <div id="list" class="list"></div>
+      </div>
+    </aside>
   </div>
 </body>
 
